@@ -1000,6 +1000,24 @@ impl Manifest {
         store.save_to_asset(source_path.as_ref(), signer, dest_path.as_ref())
     }
 
+
+    #[cfg(feature = "file_io")]
+    pub fn embed_presigned_claim<P: AsRef<Path>>(
+        &mut self,
+        source_path: P,
+        dest_path: P,
+        signature:&[u8],
+    ) -> Result<Vec<u8>> {
+        // Add manifest info for this target file
+        let source_path = self.embed_prep(source_path.as_ref(), dest_path.as_ref())?;
+
+        // convert the manifest to a store
+        let mut store = self.to_store()?;
+
+        // sign and write our store to to the output image file
+        store.save_already_signed_to_asset(source_path.as_ref(), signature, dest_path.as_ref())
+    }
+
     /// Embed a signed manifest into a stream using a supplied signer.
     /// returns the bytes of the  manifest that was embedded
     pub fn embed_from_memory(

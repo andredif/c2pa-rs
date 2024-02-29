@@ -305,7 +305,7 @@ impl Store {
     }
 
     /// Returns an Assertion referenced by JUMBF URI.  The URI should be absolute and include
-    /// the desired Claim in the path. If you need to specify the Claim for this URI use  
+    /// the desired Claim in the path. If you need to specify the Claim for this URI use
     /// get_assertion_from_uri_and_claim.
     /// uri - The JUMBF URI for desired Assertion.
     pub fn get_assertion_from_uri(&self, uri: &str) -> Option<&Assertion> {
@@ -1374,7 +1374,7 @@ impl Store {
     /// store: Store to validate
     /// xmp_str: String containing entire XMP block of the asset
     /// asset_bytes: bytes of the asset to be verified
-    /// validation_log: If present all found errors are logged and returned, other wise first error causes exit and is returned  
+    /// validation_log: If present all found errors are logged and returned, other wise first error causes exit and is returned
     pub async fn verify_store_async(
         store: &Store,
         asset_data: &mut ClaimAssetData<'_>,
@@ -1405,7 +1405,7 @@ impl Store {
     /// store: Store to validate
     /// xmp_str: String containing entire XMP block of the asset
     /// asset_bytes: bytes of the asset to be verified
-    /// validation_log: If present all found errors are logged and returned, other wise first error causes exit and is returned  
+    /// validation_log: If present all found errors are logged and returned, other wise first error causes exit and is returned
     pub fn verify_store(
         store: &Store,
         asset_data: &mut ClaimAssetData<'_>,
@@ -1750,10 +1750,10 @@ impl Store {
     /// BMFF hash binding.  If a BMFF data hash or box hash is detected that is
     /// an error.  The DataHash placeholder assertion will be  adjusted to the contain
     /// the correct values.  If the asset_reader value is supplied it will also perform
-    /// the hash calulations, otherwise the function uses the caller supplied values.  
+    /// the hash calulations, otherwise the function uses the caller supplied values.
     /// It is an error if `get_data_hashed_manifest_placeholder` was not called first
     /// as this call inserts the DataHash placeholder assertion to reserve space for the
-    /// actual hash values not required when using BoxHashes.  
+    /// actual hash values not required when using BoxHashes.
     pub fn get_data_hashed_embeddable_manifest(
         &mut self,
         dh: &DataHash,
@@ -1780,10 +1780,10 @@ impl Store {
     /// BMFF hash binding.  If a BMFF data hash or box hash is detected that is
     /// an error.  The DataHash placeholder assertion will be  adjusted to the contain
     /// the correct values.  If the asset_reader value is supplied it will also perform
-    /// the hash calulations, otherwise the function uses the caller supplied values.  
+    /// the hash calulations, otherwise the function uses the caller supplied values.
     /// It is an error if `get_data_hashed_manifest_placeholder` was not called first
     /// as this call inserts the DataHash placeholder assertion to reserve space for the
-    /// actual hash values not required when using BoxHashes.  
+    /// actual hash values not required when using BoxHashes.
     pub async fn get_data_hashed_embeddable_manifest_async(
         &mut self,
         dh: &DataHash,
@@ -1812,10 +1812,10 @@ impl Store {
     /// BMFF hash binding.  If a BMFF data hash or box hash is detected that is
     /// an error.  The DataHash placeholder assertion will be  adjusted to the contain
     /// the correct values.  If the asset_reader value is supplied it will also perform
-    /// the hash calulations, otherwise the function uses the caller supplied values.  
+    /// the hash calulations, otherwise the function uses the caller supplied values.
     /// It is an error if `get_data_hashed_manifest_placeholder` was not called first
     /// as this call inserts the DataHash placeholder assertion to reserve space for the
-    /// actual hash values not required when using BoxHashes.  
+    /// actual hash values not required when using BoxHashes.
     pub async fn get_data_hashed_embeddable_manifest_remote(
         &mut self,
         dh: &DataHash,
@@ -1909,7 +1909,7 @@ impl Store {
 
     /// Returns the supplied manifest composed to be directly compatibile with the desired format.
     /// For example, if format is JPEG funtion will return the set of APP11 segments that contains
-    /// the manifest.  Similarly for PNG it would be the PNG chunk complete with header and  CRC.   
+    /// the manifest.  Similarly for PNG it would be the PNG chunk complete with header and  CRC.
     pub fn get_composed_manifest(&self, manifest_bytes: &[u8], format: &str) -> Result<Vec<u8>> {
         if let Some(h) = get_assetio_handler(format) {
             if let Some(composed_data_handler) = h.composed_data_ref() {
@@ -2039,6 +2039,60 @@ impl Store {
         };
 
         match self.finish_save(jumbf_bytes, &output_path, sig, &sig_placeholder) {
+            Ok((s, m)) => {
+                // save sig so store is up to date
+                let pc_mut = self.provenance_claim_mut().ok_or(Error::ClaimEncoding)?;
+                pc_mut.set_signature_val(s);
+
+                // do we need to make a C2PA file in addtion to standard embedded output
+                if let crate::claim::RemoteManifest::EmbedWithRemote(_url) =
+                    pc_mut.remote_manifest()
+                {
+                    let c2pa = output_path.with_extension(MANIFEST_STORE_EXT);
+                    std::fs::write(c2pa, &m)?;
+                }
+
+                // copy the correct files upon completion
+                Store::copy_c2pa_to_output(&temp_file, dest_path, pc_mut.remote_manifest())?;
+
+                Ok(m)
+            }
+            Err(e) => Err(e),
+        }
+    }
+
+    /// Embed the claims store as jumbf into an asset, but taking the pre-calculated signature as given input
+    #[cfg(feature = "file_io")]
+    pub fn save_already_signed_to_asset(
+        &mut self,
+        asset_path: &Path,
+        sig: &[u8],
+        dest_path: &Path,
+    ) -> Result<Vec<u8>> {
+        // set up temp dir, contents auto deleted
+        let td = tempfile::TempDir::new()?;
+        let temp_path = td.into_path();
+        let temp_file = temp_path.join(
+            dest_path
+                .file_name()
+                .ok_or_else(|| Error::BadParam("invalid destination path".to_string()))?,
+        );
+
+        let jumbf_bytes = self.start_save(asset_path, &temp_file, sig.len())?;
+
+        let pc = self.provenance_claim().ok_or(Error::ClaimEncoding)?;
+        let sig_placeholder = Store::sign_claim_placeholder(pc, sig.len());
+
+        // get correct output path for remote manifest
+        let output_path = match pc.remote_manifest() {
+            crate::claim::RemoteManifest::NoRemote
+            | crate::claim::RemoteManifest::EmbedWithRemote(_) => temp_file.to_path_buf(),
+            crate::claim::RemoteManifest::SideCar | crate::claim::RemoteManifest::Remote(_) => {
+                temp_file.with_extension(MANIFEST_STORE_EXT)
+            }
+        };
+
+        match self.finish_save(jumbf_bytes, &output_path, sig.to_vec(), &sig_placeholder) {
             Ok((s, m)) => {
                 // save sig so store is up to date
                 let pc_mut = self.provenance_claim_mut().ok_or(Error::ClaimEncoding)?;
@@ -2530,7 +2584,7 @@ impl Store {
 
     /// Verify Store from an existing asset
     /// asset_path: path to input asset
-    /// validation_log: If present all found errors are logged and returned, otherwise first error causes exit and is returned  
+    /// validation_log: If present all found errors are logged and returned, otherwise first error causes exit and is returned
     #[cfg(feature = "file_io")]
     pub fn verify_from_path(
         &mut self,
@@ -2746,7 +2800,7 @@ impl Store {
     /// Load Store from claims in an existing asset
     /// asset_path: path to input asset
     /// verify: determines whether to verify the contents of the provenance claim.  Must be set true to use validation_log
-    /// validation_log: If present all found errors are logged and returned, otherwise first error causes exit and is returned  
+    /// validation_log: If present all found errors are logged and returned, otherwise first error causes exit and is returned
     #[cfg(feature = "file_io")]
     pub fn load_from_asset(
         asset_path: &Path,
